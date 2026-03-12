@@ -62,6 +62,10 @@ def main() -> None:
 		results = model(frame, verbose=False)
 		detections = results[0]
 
+		# Check for collisions and display message
+		person_boxes = []
+		other_boxes = []
+
 		for box in detections.boxes:
 			class_id = int(box.cls[0])
 			label = detections.names[class_id]
@@ -73,6 +77,11 @@ def main() -> None:
 				continue
 
 			x1, y1, x2, y2 = box.xyxy[0].tolist()
+			if label == "person":
+				person_boxes.append((x1, y1, x2, y2))
+			else:
+				other_boxes.append((label, x1, y1, x2, y2))
+
 			label_text = f"{label_aliases.get(label, label)} {confidence:.2f}"
 			color = color_from_label(label)
 
@@ -86,6 +95,20 @@ def main() -> None:
 				color,
 				2,
 			)
+
+		# Check for intersections
+		for px1, py1, px2, py2 in person_boxes:
+			for label, ox1, oy1, ox2, oy2 in other_boxes:
+				if px1 < ox2 and px2 > ox1 and py1 < oy2 and py2 > oy1:  # Intersection condition
+					cv2.putText(
+						frame,
+						f"Person is intersecting with {label}",
+						(10, 30),  # Position trxt will appear on the screen
+						cv2.FONT_HERSHEY_SIMPLEX,
+						0.8,
+						(0, 0, 255),
+						2,
+					)
 
 		cv2.imshow("Object Detection", frame)
 
