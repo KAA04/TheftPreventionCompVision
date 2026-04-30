@@ -16,6 +16,8 @@ def main() -> None:
 		print("Ultralytics is not installed. Run: pip install ultralytics")
 		return
 
+	from deep_sort_realtime.deepsort_tracker import DeepSort
+
 	cap = cv2.VideoCapture(0)
 	if not cap.isOpened():
 		print("Could not open the default camera.")
@@ -45,6 +47,9 @@ def main() -> None:
 		# "refrigerator": (255, 255, 0),
 	}
 
+	# Initialize DeepSORT tracker
+	tracker = DeepSort(max_age=30, n_init=3, nn_budget=10)
+
 	def color_from_label(name: str) -> tuple[int, int, int]:
 		if name in label_colors:
 			return label_colors[name]
@@ -52,6 +57,11 @@ def main() -> None:
 		return (seed, (seed * 2) % 255, (seed * 3) % 255)
 
 	print("Object detection running. Press 'q' or ESC to quit.")
+
+	# State variables for theft prevention
+	phone_present = False
+	person_interacting = False
+	interaction_detected = False
 
 	while True:
 		ok, frame = cap.read()
@@ -62,10 +72,8 @@ def main() -> None:
 		results = model(frame, verbose=False)
 		detections = results[0]
 
-		# Check for collisions and display message
-		person_boxes = []
-		other_boxes = []
-
+		# Prepare detections for DeepSORT
+		dets = []
 		for box in detections.boxes:
 			class_id = int(box.cls[0])
 			label = detections.names[class_id]
@@ -77,40 +85,89 @@ def main() -> None:
 				continue
 
 			x1, y1, x2, y2 = box.xyxy[0].tolist()
+			dets.append(((x1, y1, x2, y2), confidence, label))
+
+		# Update tracker with detections
+		tracks = tracker.update_tracks(dets, frame=frame)
+
+		# Reset state for this frame
+		person_boxes = []
+		phone_boxes = []
+
+		for track in tracks:
+			if not track.is_confirmed():
+				continue
+
+			track_id = track.track_id
+			ltrb = track.to_ltrb()
+			x1, y1, x2, y2 = map(int, ltrb)
+			label = track.get_det_class()
+
 			if label == "person":
 				person_boxes.append((x1, y1, x2, y2))
-			else:
-				other_boxes.append((label, x1, y1, x2, y2))
+			elif label == "cell phone":
+				phone_boxes.append((x1, y1, x2, y2))
 
-			label_text = f"{label_aliases.get(label, label)} {confidence:.2f}"
+			label_text = f"{label_aliases.get(label, label)} ID:{track_id}"
 			color = color_from_label(label)
 
-			cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+			cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 			cv2.putText(
 				frame,
 				label_text,
-				(int(x1), max(int(y1) - 8, 20)),
+				(x1, max(y1 - 8, 20)),
 				cv2.FONT_HERSHEY_SIMPLEX,
 				0.6,
 				color,
 				2,
 			)
 
-		# Check for intersections
+		# Update phone presence state
+		phone_present = len(phone_boxes) > 0
+
+		# Check for interactions
+		interaction_detected = False
 		for px1, py1, px2, py2 in person_boxes:
-			for label, ox1, oy1, ox2, oy2 in other_boxes:
+			for ox1, oy1, ox2, oy2 in phone_boxes:
 				if px1 < ox2 and px2 > ox1 and py1 < oy2 and py2 > oy1:  # Intersection condition
+					interaction_detected = True
+					person_interacting = True
 					cv2.putText(
 						frame,
-						f"Person is intersecting with {label}",
+						"Person interacting with phone",
 						(10, 30),  # Position trxt will appear on the screen
 						cv2.FONT_HERSHEY_SIMPLEX,
 						0.8,
-						(0, 0, 255),
+						(0, 255, 255),
 						2,
 					)
 
-		cv2.imshow("Object Detection", frame)
+		# Theft detection logic
+		if not interaction_detected and person_interacting:
+			person_interacting = False
+			if not phone_present:
+				cv2.putText(
+					frame,
+					"ALERT: Phone stolen!",
+					(10, 60),
+					cv2.FONT_HERSHEY_SIMPLEX,
+					0.8,
+					(0, 0, 255),
+					2,
+				)
+				print("ALERT: Phone stolen!")
+			else:
+				cv2.putText(
+					frame,
+					"Phone is safe.",
+					(10, 60),
+					cv2.FONT_HERSHEY_SIMPLEX,
+					0.8,
+					(0, 255, 0),
+					2,
+				)
+
+		cv2.imshow("Theft Prevention System with Tracking", frame)
 
 		key = cv2.waitKey(1) & 0xFF
 		if key in (ord("q"), 27):
