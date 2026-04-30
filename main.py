@@ -24,7 +24,7 @@ def main() -> None:
 	model = YOLO("yolov8n.pt")
 
 	# YOLOv8 COCO labels
-	target_labels = {"person", "cell phone", "suitcase", "fork", "knife", "spoon", "tv", "laptop", "mouse", "remote", "keyboard", "microwave", "oven", "toaster", "sink", "refrigerator"}
+	target_labels = {"person", "cell phone"}#, "suitcase", "fork", "knife", "spoon", "tv", "laptop", "mouse", "remote", "keyboard", "microwave", "oven", "toaster", "sink", "refrigerator"}
 	label_aliases = {"cell phone": "phone"}
 	label_colors = {
 		"person": (0, 140, 255),
