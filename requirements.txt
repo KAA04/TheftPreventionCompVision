@@ -1,2 +1,5 @@
 ultralytics
 deep-sort-realtime
+flask
+opencv-python
+flask-cors

@@ -1,0 +1,58 @@
+/* App.css */
+
+.App {
+  text-align: center;
+  font-family: Arial, sans-serif;
+}
+
+.camera-feed {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 20px 0;
+}
+
+.camera-box {
+  width: 640px;
+  height: 480px;
+  border: 2px solid #000;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #f0f0f0;
+}
+
+.camera-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.status-indicator {
+  margin: 20px 0;
+  font-size: 24px;
+  font-weight: bold;
+}
+
+.status-indicator .present {
+  color: green;
+}
+
+.status-indicator .removed {
+  color: red;
+}
+
+.event-log {
+  margin: 20px;
+  text-align: left;
+}
+
+.event-log ul {
+  list-style: none;
+  padding: 0;
+}
+
+.event-log li {
+  margin: 5px 0;
+}
