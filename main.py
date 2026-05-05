@@ -37,7 +37,7 @@ interaction_started = False
 was_overlapping = False
 
 phone_missing_start = None
-THEFT_DELAY = 2  # seconds
+THEFT_DELAY = 5  # seconds
 
 
 @app.route('/video_feed')
@@ -122,14 +122,27 @@ def video_feed():
                         interaction_started = True
                         was_overlapping = True
 
+                        message = "Person interacting with phone"
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        font_scale = 0.8
+                        thickness = 2
+                        
+                        # (text_width, text_height), baseline = cv2.getTextSize(
+                        #     message, font, font_scale, thickness
+                        # )
+                        
+                        frame_height, frame_width = frame.shape[:2]
+                        x = (frame_width // 4)
+                        y = frame_height - (frame_height // 6)  # slightly above bottom so it doesn't overlap UI
+
                         cv2.putText(
                             frame,
-                            "Person interacting with phone",
-                            (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.8,
+                            message,
+                            (x, y),
+                            font,
+                            font_scale,
                             (0, 255, 255),
-                            2,
+                            thickness,
                         )
 
             # ===========================
@@ -140,21 +153,33 @@ def video_feed():
                 if phone_present:
                     # reset timer if phone reappears
                     phone_missing_start = None
+                    elapsed = 0
 
-                    cv2.putText(
-                        frame,
-                        "Phone is safe",
-                        (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (0, 255, 0),
-                        2,
-                    )
+                    if not overlap_detected:
+                        message = "Phone Safe"
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        font_scale = 0.8
+                        thickness = 2
+                    
+                        frame_height, frame_width = frame.shape[:2]
+                        x = (frame_width // 4)
+                        y = frame_height - (frame_height // 6)  # slightly above bottom so it doesn't overlap UI
+
+                        cv2.putText(
+                            frame,
+                            message,
+                            (x, y),
+                            font,
+                            font_scale,
+                            (255, 255, 0),
+                            thickness,
+                        )
 
                 else:
                     # start timer when phone disappears
                     if phone_missing_start is None:
                         phone_missing_start = time.time()
+                        #print("phone now missing")
 
                     elapsed = time.time() - phone_missing_start
 
@@ -162,7 +187,7 @@ def video_feed():
 
                     # only trigger theft after 5 seconds
                     if elapsed >= THEFT_DELAY:
-
+                        #print("phone has been stolen!!!!!!!!!!!!!!!!!!!!!!!!")
                         event = {
                             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "message": "ALERT: Phone stolen!"
@@ -171,14 +196,23 @@ def video_feed():
                         theft_events.append(event)
                         event_log.append(f"{event['timestamp']} - THEFT")
 
+                        message = "PHONE STOLEN"
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        font_scale = 0.8
+                        thickness = 2
+                    
+                        frame_height, frame_width = frame.shape[:2]
+                        x = (frame_width // 4)
+                        y = frame_height - (frame_height // 6)  # slightly above bottom so it doesn't overlap UI
+    
                         cv2.putText(
-                            frame,
-                            event["message"],
-                            (10, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.8,
+                                frame,
+                            message,
+                            (x, y),
+                            font,
+                            font_scale,
                             (0, 0, 255),
-                            2,
+                            thickness,
                         )
 
                         # reset system after theft
