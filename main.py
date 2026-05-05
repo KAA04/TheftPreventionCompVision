@@ -1,5 +1,6 @@
 from flask import Flask, Response, jsonify
 import cv2
+import time
 from datetime import datetime
 from flask_cors import CORS
 from ultralytics import YOLO
@@ -8,53 +9,52 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 app = Flask(__name__)
 CORS(app)
 
-# Initialize camera
 camera = cv2.VideoCapture(0)
 
-# ===========================
-# ✅ UPDATED: TensorRT engine
-# ===========================
 model = YOLO("yolov8n.engine")
 
-# Initialize DeepSORT tracker
 tracker = DeepSort(max_age=10, n_init=3, nn_budget=10)
 
-# YOLOv8 COCO labels
 target_labels = {"person", "cell phone"}
 label_aliases = {"cell phone": "phone"}
+
 label_colors = {
     "person": (0, 140, 255),
     "cell phone": (0, 220, 0),
 }
 
-def color_from_label(name: str) -> tuple[int, int, int]:
-    if name in label_colors:
-        return label_colors[name]
+def color_from_label(name: str):
     seed = sum(ord(ch) for ch in name) % 255
     return (seed, (seed * 2) % 255, (seed * 3) % 255)
 
-# In-memory event log
-object_present = False
 event_log = []
 theft_events = []
 
+# ===========================
+# STATE VARIABLES
+# ===========================
+interaction_started = False
+was_overlapping = False
+
+phone_missing_start = None
+THEFT_DELAY = 2  # seconds
+
+
 @app.route('/video_feed')
 def video_feed():
-    """Stream live video feed with detection and tracking."""
 
     def generate():
-        global object_present
-
-        phone_present = False
-        person_interacting = False
+        global interaction_started, was_overlapping, phone_missing_start
 
         while True:
             success, frame = camera.read()
             if not success:
                 break
 
+            frame = cv2.resize(frame, (640, 640))
+
             # ===========================
-            # ✅ UPDATED inference call
+            # YOLO inference
             # ===========================
             results = model(frame, imgsz=640, verbose=False)
             detections = results[0]
@@ -68,39 +68,33 @@ def video_feed():
                 if label not in target_labels:
                     continue
 
-                confidence = float(box.conf[0])
-                if confidence < 0.4:
+                conf = float(box.conf[0])
+                if conf < 0.4:
                     continue
 
                 x1, y1, x2, y2 = box.xyxy[0].tolist()
-                dets.append(((x1, y1, x2, y2), confidence, label))
+                dets.append(((x1, y1, x2, y2), conf, label))
+                
+            print(dets)
 
-            # Update tracker
-            tracks = tracker.update_tracks(dets, frame=frame)
-
+            # ===========================
+            # Parse detections
+            # ===========================
             person_boxes = []
             phone_boxes = []
 
-            for track in tracks:
-                if not track.is_confirmed():
-                    continue
+            for (box, conf, label) in dets:
+                x1, y1, x2, y2 = map(int, box)
 
-                track_id = track.track_id
-                x1, y1, x2, y2 = map(int, track.to_ltrb())
-                label = track.get_det_class()
-
-                if label == "person":
-                    person_boxes.append((x1, y1, x2, y2))
-                elif label == "cell phone":
-                    phone_boxes.append((x1, y1, x2, y2))
-
-                label_text = f"{label_aliases.get(label, label)} ID:{track_id}"
                 color = color_from_label(label)
 
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+                text = f"{label_aliases.get(label, label)} {conf:.2f}"
+
                 cv2.putText(
                     frame,
-                    label_text,
+                    text,
                     (x1, max(y1 - 8, 20)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
@@ -108,16 +102,25 @@ def video_feed():
                     2,
                 )
 
+                if label == "person":
+                    person_boxes.append((x1, y1, x2, y2))
+                elif label == "cell phone":
+                    phone_boxes.append((x1, y1, x2, y2))
+
+            person_present = len(person_boxes) > 0
             phone_present = len(phone_boxes) > 0
 
-            interaction_detected = False
+            # ===========================
+            # STEP 1: detect overlap
+            # ===========================
+            overlap_detected = False
 
             for px1, py1, px2, py2 in person_boxes:
                 for ox1, oy1, ox2, oy2 in phone_boxes:
                     if px1 < ox2 and px2 > ox1 and py1 < oy2 and py2 > oy1:
-                        interaction_detected = True
-                        person_interacting = True
-                        object_present = True
+                        overlap_detected = True
+                        interaction_started = True
+                        was_overlapping = True
 
                         cv2.putText(
                             frame,
@@ -129,39 +132,59 @@ def video_feed():
                             2,
                         )
 
-            # Theft logic
-            if not interaction_detected and person_interacting:
-                person_interacting = False
+            # ===========================
+            # STEP 2: PHONE DISAPPEAR TIMER
+            # ===========================
+            if interaction_started and was_overlapping:
 
-                if not phone_present:
-                    theft_event = {
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "message": "ALERT: Phone stolen!"
-                    }
-
-                    object_present = False
-                    theft_events.append(theft_event)
-                    event_log.append(f"{theft_event['timestamp']} - THEFT")
+                if phone_present:
+                    # reset timer if phone reappears
+                    phone_missing_start = None
 
                     cv2.putText(
                         frame,
-                        theft_event["message"],
-                        (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (0, 0, 255),
-                        2,
-                    )
-                else:
-                    cv2.putText(
-                        frame,
-                        "Phone is safe.",
+                        "Phone is safe",
                         (10, 60),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.8,
                         (0, 255, 0),
                         2,
                     )
+
+                else:
+                    # start timer when phone disappears
+                    if phone_missing_start is None:
+                        phone_missing_start = time.time()
+
+                    elapsed = time.time() - phone_missing_start
+
+                    #print("phone missing for:", elapsed)
+
+                    # only trigger theft after 5 seconds
+                    if elapsed >= THEFT_DELAY:
+
+                        event = {
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "message": "ALERT: Phone stolen!"
+                        }
+
+                        theft_events.append(event)
+                        event_log.append(f"{event['timestamp']} - THEFT")
+
+                        cv2.putText(
+                            frame,
+                            event["message"],
+                            (10, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8,
+                            (0, 0, 255),
+                            2,
+                        )
+
+                        # reset system after theft
+                        interaction_started = False
+                        was_overlapping = False
+                        phone_missing_start = None
 
             # Encode frame
             _, buffer = cv2.imencode('.jpg', frame)
