@@ -1,2 +1,5 @@
 .venv/
 yolov8n.pt
+yolov8n.trt
+yolov8n.onnx
+yolov8n.engine
