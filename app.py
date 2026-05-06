@@ -92,7 +92,7 @@ def video_feed():
                 elif label == "cell phone":
                     phone_boxes.append((x1, y1, x2, y2))
 
-                label_text = f"{label_aliases.get(label, label)} ID:{track_id}"
+                label_text = f"{label_aliases.get(label, label)}: {confidence:.2f}"
                 color = color_from_label(label)
 
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
